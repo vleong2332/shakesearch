@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"strconv"
 )
 
 func main() {
@@ -43,25 +44,42 @@ type Searcher struct {
 
 func handleSearch(searcher Searcher) func(w http.ResponseWriter, r *http.Request) {
 	return func(w http.ResponseWriter, r *http.Request) {
-		query, ok := r.URL.Query()["q"]
-		if !ok || len(query[0]) < 1 {
+		query, qOK := r.URL.Query()["q"]
+		if !qOK || len(query[0]) < 1 {
 			w.WriteHeader(http.StatusBadRequest)
 			w.Write([]byte("missing search query in URL params"))
 			return
 		}
-		results, searchError := searcher.Search(query[0])
+
+		offset, offsetExists := r.URL.Query()["offset"]
+		offsetAsInt := 0
+		if offsetExists {
+			parsedInt, parseIntError := strconv.Atoi(offset[0])
+			if parseIntError != nil {
+				w.WriteHeader(http.StatusBadRequest)
+				w.Write([]byte("invalid offset in URL params"))
+				return
+			}
+			offsetAsInt = parsedInt
+		}
+
+		results, hasMore, searchError := searcher.Search(query[0], offsetAsInt)
 		if searchError != nil {
 			return
 		}
+
 		buf := &bytes.Buffer{}
 		enc := json.NewEncoder(buf)
 		encodingError := enc.Encode(results)
+
 		if encodingError != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			w.Write([]byte("encoding failure"))
 			return
 		}
+
 		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("X-Has-More", strconv.FormatBool(hasMore))
 		w.Write(buf.Bytes())
 	}
 }
@@ -79,7 +97,7 @@ func (s *Searcher) Load(filename string) error {
 /**
  * Returns (results, hasMore, error)
  */
-func (s *Searcher) Search(query string) ([]string, error) {
+func (s *Searcher) Search(query string, offset int) ([]string, bool, error) {
 	/**
 	 * TODO: Current trade-off is case-insensitivity vs. correctness. Something's wrong with punctuation:
 	 * "posting is no need. " works; "posting is no need. O" doesn't.
@@ -87,12 +105,38 @@ func (s *Searcher) Search(query string) ([]string, error) {
 	 */
 	caseInsensitiveRegex, err := regexp.Compile("(?i)" + query)
 	if err != nil {
-		return nil, fmt.Errorf("Search: %w", err)
+		return nil, false, fmt.Errorf("Search: %w", err)
 	}
-	idxs2 := s.SuffixArray.FindAllIndex(caseInsensitiveRegex, -1)
+
+	// n = -1 to keep all results returned in successive order.
+	idxs := s.SuffixArray.FindAllIndex(caseInsensitiveRegex, -1)
+
+	totalCount := len(idxs)
+	boundedPageStartIndex := Min(offset, totalCount)
+	boundedPageEndIndex := Min(boundedPageStartIndex+20, totalCount)
+
 	results := []string{}
-	for _, idx := range idxs2 {
-		results = append(results, s.CompleteWorks[idx[0]-250:idx[0]+250])
+	for _, idx := range idxs[boundedPageStartIndex:boundedPageEndIndex] {
+		boundedPreviewStartIndex := Max(idx[0]-250, 0)
+		boundedPreviewEndIndex := Min(idx[0]+250, len(s.CompleteWorks))
+		results = append(results, s.CompleteWorks[boundedPreviewStartIndex:boundedPreviewEndIndex])
 	}
-	return results, nil
+
+	return results, boundedPageEndIndex < totalCount, nil
+}
+
+// Min returns the smaller of x or y.
+func Min(x, y int) int {
+	if x < y {
+		return x
+	}
+	return y
+}
+
+// Max returns the larger of x or y.
+func Max(x, y int) int {
+	if x > y {
+		return x
+	}
+	return y
 }
