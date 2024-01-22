@@ -13,6 +13,9 @@ import (
 	"strconv"
 )
 
+const PreviewSize = 250
+const PageSize = 20
+
 func main() {
 	searcher := Searcher{}
 	err := searcher.Load("completeworks.txt")
@@ -99,26 +102,28 @@ func (s *Searcher) Load(filename string) error {
  */
 func (s *Searcher) Search(query string, offset int) ([]string, bool, error) {
 	/**
-	 * TODO: Current trade-off is case-insensitivity vs. correctness. Something's wrong with punctuation:
-	 * "posting is no need. " works; "posting is no need. O" doesn't.
-	 * Tried regexp.QuoteMeta(query) but same result. Punting this since it's out of scope.
+	 * TODO: Something's wrong with some punctuations:
+	 * - period doesn't work -- "posting is no need. " works; "posting is no need. O" doesn't.
+	 * - comma works-- "very finely, very comely".
+	 *
+	 * Hunch is some punctuation is mistaken as regex. Tried regexp.QuoteMeta(query) but same
+	 * result. Punting this since it's technically out of scope.
 	 */
 	caseInsensitiveRegex, err := regexp.Compile("(?i)" + query)
 	if err != nil {
 		return nil, false, fmt.Errorf("Search: %w", err)
 	}
 
-	// n = -1 to keep all results returned in successive order.
 	idxs := s.SuffixArray.FindAllIndex(caseInsensitiveRegex, -1)
 
 	totalCount := len(idxs)
 	boundedPageStartIndex := Min(offset, totalCount)
-	boundedPageEndIndex := Min(boundedPageStartIndex+20, totalCount)
+	boundedPageEndIndex := Min(boundedPageStartIndex+PageSize, totalCount)
 
 	results := []string{}
 	for _, idx := range idxs[boundedPageStartIndex:boundedPageEndIndex] {
-		boundedPreviewStartIndex := Max(idx[0]-250, 0)
-		boundedPreviewEndIndex := Min(idx[0]+250, len(s.CompleteWorks))
+		boundedPreviewStartIndex := Max(idx[0]-PreviewSize, 0)
+		boundedPreviewEndIndex := Min(idx[0]+PreviewSize, len(s.CompleteWorks))
 		results = append(results, s.CompleteWorks[boundedPreviewStartIndex:boundedPreviewEndIndex])
 	}
 
