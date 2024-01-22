@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"regexp"
 )
 
 func main() {
@@ -48,11 +49,14 @@ func handleSearch(searcher Searcher) func(w http.ResponseWriter, r *http.Request
 			w.Write([]byte("missing search query in URL params"))
 			return
 		}
-		results := searcher.Search(query[0])
+		results, searchError := searcher.Search(query[0])
+		if searchError != nil {
+			return
+		}
 		buf := &bytes.Buffer{}
 		enc := json.NewEncoder(buf)
-		err := enc.Encode(results)
-		if err != nil {
+		encodingError := enc.Encode(results)
+		if encodingError != nil {
 			w.WriteHeader(http.StatusInternalServerError)
 			w.Write([]byte("encoding failure"))
 			return
@@ -72,11 +76,23 @@ func (s *Searcher) Load(filename string) error {
 	return nil
 }
 
-func (s *Searcher) Search(query string) []string {
-	idxs := s.SuffixArray.Lookup([]byte(query), -1)
-	results := []string{}
-	for _, idx := range idxs {
-		results = append(results, s.CompleteWorks[idx-250:idx+250])
+/**
+ * Returns (results, hasMore, error)
+ */
+func (s *Searcher) Search(query string) ([]string, error) {
+	/**
+	 * TODO: Current trade-off is case-insensitivity vs. correctness. Something's wrong with punctuation:
+	 * "posting is no need. " works; "posting is no need. O" doesn't.
+	 * Tried regexp.QuoteMeta(query) but same result. Punting this since it's out of scope.
+	 */
+	caseInsensitiveRegex, err := regexp.Compile("(?i)" + query)
+	if err != nil {
+		return nil, fmt.Errorf("Search: %w", err)
 	}
-	return results
+	idxs2 := s.SuffixArray.FindAllIndex(caseInsensitiveRegex, -1)
+	results := []string{}
+	for _, idx := range idxs2 {
+		results = append(results, s.CompleteWorks[idx[0]-250:idx[0]+250])
+	}
+	return results, nil
 }
