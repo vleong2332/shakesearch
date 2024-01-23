@@ -102,12 +102,11 @@ func (s *Searcher) Load(filename string) error {
  */
 func (s *Searcher) Search(query string, offset int) ([]string, bool, error) {
 	/**
-	 * TODO: Something's wrong with some punctuations:
+	 * TODO: Something's wrong with some punctuations. Hunch is the \r\n characters that got in the
+	 * way.
+	 *
 	 * - period doesn't work -- "posting is no need. " works; "posting is no need. O" doesn't.
 	 * - comma works-- "very finely, very comely".
-	 *
-	 * Hunch is some punctuation is mistaken as regex. Tried regexp.QuoteMeta(query) but same
-	 * result. Punting this since it's technically out of scope.
 	 */
 	caseInsensitiveRegex, err := regexp.Compile("(?i)" + query)
 	if err != nil {
